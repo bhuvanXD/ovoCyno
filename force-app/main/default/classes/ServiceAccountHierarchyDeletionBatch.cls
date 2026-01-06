@@ -4,25 +4,17 @@ public without sharing class ServiceAccountHierarchyDeletionBatch implements Dat
 
     // --- INNER CLASS: DELETION PLAN ---
     private class DeletionPlan {
-        // Bucket 1: Financial & Supply Chain
         public List<SObject> financialRecords = new List<SObject>(); 
-        
-        // Bucket 2: Standard Children
         public List<SObject> serviceRecords = new List<SObject>();   
-        
-        // Bucket 3a: Late Children (Leaf Nodes: Actions, Knowledge)
         public List<SObject> lateChildRecords = new List<SObject>();
-
-        // Bucket 3b: Late Parents (Container Nodes: Cases, Agents, Ombudsman Cases)
         public List<SObject> lateParentRecords = new List<SObject>();
-        
-        // Updates (Self-references) & Files
         public List<SObject> recordsToUpdate = new List<SObject>();
         public Set<Id> entityIdsWithFiles = new Set<Id>();
     }
 
     // --- START ---
     public Database.QueryLocator start(Database.BatchableContext bc) {
+        // Query ALL Service Accounts in the system
         return Database.getQueryLocator([SELECT Id FROM Service_Account__c]);
     }
 
@@ -33,57 +25,39 @@ public without sharing class ServiceAccountHierarchyDeletionBatch implements Dat
         try {
             totalSAProcessed += scope.size();
             
-            // 1. Initialize
             Map<Id, Service_Account__c> saMap = new Map<Id, Service_Account__c>(scope);
             Set<Id> saIds = saMap.keySet();
             DeletionPlan plan = new DeletionPlan();
 
-            // 2. Collection Phase
+            // 1. Collection Phase
             collectFinancialAndSupply(saIds, plan);
             collectStandardChildren(saIds, plan);
             
-            // Collect Cases & Agents
+            // Collect Cases & Agents (Includes Ombudsman Logic)
             List<Case> casesToDelete = collectCaseRecords(saIds, plan);
             Set<Id> caseIds = new Map<Id, Case>(casesToDelete).keySet();
             collectAgentRecords(saIds, caseIds, plan);
             
-            // Add Cases to Parent Bucket
+            // Add Cases to Parent Bucket for deletion
             plan.lateParentRecords.addAll(casesToDelete);
 
-            // ==========================================================
-            // 3. EXECUTION PHASE
-            // ==========================================================
+            // 2. Execution Phase
             
-            // A. Updates First
+            // A. Update Self-References First (Unlock records)
             if (!plan.recordsToUpdate.isEmpty()) {
                 update deduplicate(plan.recordsToUpdate);
             }
 
-            // B. Delete Files (Clean up files from ALL records before deleting records)
+            // B. Delete Files (NOW INCLUDES OMBUDSMAN CASES)
             deleteFiles(plan.entityIdsWithFiles);
 
-            // C. SEQUENTIAL DELETES
-            
-            if (!plan.financialRecords.isEmpty()) {
-                delete deduplicate(plan.financialRecords); // 1. Financials
-            }
+            // C. Sequential Deletes
+            if (!plan.financialRecords.isEmpty()) delete deduplicate(plan.financialRecords);
+            if (!plan.serviceRecords.isEmpty()) delete deduplicate(plan.serviceRecords); 
+            if (!plan.lateChildRecords.isEmpty()) delete deduplicate(plan.lateChildRecords); 
+            if (!plan.lateParentRecords.isEmpty()) delete deduplicate(plan.lateParentRecords); 
 
-            if (!plan.serviceRecords.isEmpty()) {
-                delete deduplicate(plan.serviceRecords);   // 2. Service Children
-            }
-
-            // 3a. Delete Leaf Nodes
-            if (!plan.lateChildRecords.isEmpty()) {
-                delete deduplicate(plan.lateChildRecords); 
-            }
-
-            // 3b. Delete Parent Nodes (Ombudsman Case is here)
-            // Deleting the Parent AUTOMATICALLY deletes the Ombudsman Resolution
-            if (!plan.lateParentRecords.isEmpty()) {
-                delete deduplicate(plan.lateParentRecords); 
-            }
-
-            // D. Final Delete: The Scope
+            // D. Final Delete: The Service Accounts themselves
             delete scope;
 
         } catch (Exception ex) {
@@ -94,29 +68,7 @@ public without sharing class ServiceAccountHierarchyDeletionBatch implements Dat
     
     // --- FINISH ---
     public void finish(Database.BatchableContext bc) {
-        AsyncApexJob job = [
-            SELECT Id, Status, NumberOfErrors, JobItemsProcessed, TotalJobItems, CreatedBy.Email
-            FROM AsyncApexJob
-            WHERE Id = :bc.getJobId()
-        ];
-        
-        Messaging.SingleEmailMessage mail = new Messaging.SingleEmailMessage();
-        mail.setToAddresses(new String[] { 'bhuvan.sain@cynoteck.com' });
-        mail.setSubject('Batch Job Summary: Service Account Hierarchy Cleanup');
-
-        String body = 'Batch Job Status: ' + job.Status + '\n' +
-                      'Service Accounts Processed: ' + totalSAProcessed + '\n' +
-                      'Errors: ' + job.NumberOfErrors;
-
-        mail.setPlainTextBody(body);
-        
-        if (!Test.isRunningTest()) {
-            try {
-                Messaging.sendEmail(new Messaging.SingleEmailMessage[] { mail });
-            } catch (Exception e) {
-                System.debug('Failed to send email: ' + e.getMessage());
-            }
-        }
+        System.debug('✅ DELETION COMPLETE. Processed: ' + totalSAProcessed);
     }
     
     // =================================================================
@@ -169,34 +121,36 @@ public without sharing class ServiceAccountHierarchyDeletionBatch implements Dat
             }
         }
         
+        // 1. Add CASES to file cleanup
         plan.entityIdsWithFiles.addAll(caseIds);
         
-        // Children (Explicit Delete)
+        // Case Children
         plan.lateChildRecords.addAll([SELECT Id FROM Case_Action__c WHERE Case__c IN :caseIds OR Internal_Case__c IN :caseIds]);
         plan.lateChildRecords.addAll([SELECT Id FROM Knowledge_Article_Tracking__c WHERE Case__c IN :caseIds]);
 
-        // Email Files (Implicit Delete)
+        // Email Files
         List<EmailMessage> caseEmails = [SELECT Id FROM EmailMessage WHERE ParentId IN :caseIds OR RelatedToId IN :caseIds];
         if (!caseEmails.isEmpty()) {
             plan.entityIdsWithFiles.addAll(new Map<Id, EmailMessage>(caseEmails).keySet());
         }
 
-        // --- OMBUDSMAN LOGIC (UPDATED) ---
+        // --- OMBUDSMAN LOGIC (FIX APPLIED) ---
         List<Ombudsman_Case__c> ombCases = [SELECT Id FROM Ombudsman_Case__c WHERE Case__c IN :caseIds];
         if (!ombCases.isEmpty()) {
             Set<Id> ombIds = new Map<Id, Ombudsman_Case__c>(ombCases).keySet();
             
-            // 1. Check Resolutions ONLY to clean up Files (Do NOT add to delete list)
+            // ✅ FIX: Add Ombudsman Cases themselves to file cleanup list
+            plan.entityIdsWithFiles.addAll(ombIds); 
+
+            // Check Resolutions for files too
             List<Ombudsman_Resolution__c> resolutions = [SELECT Id FROM Ombudsman_Resolution__c WHERE Ombudsman_Case__c IN :ombIds];
             if(!resolutions.isEmpty()) {
                  plan.entityIdsWithFiles.addAll(new Map<Id, Ombudsman_Resolution__c>(resolutions).keySet());
             }
 
-            // 2. Add Ombudsman Case (Parent) to delete list
-            // Deleting this will CASCADE DELETE the resolutions automatically.
+            // Add Ombudsman Case to parent delete list (Resolutions cascade automatically)
             plan.lateParentRecords.addAll(ombCases);
         }
-        // ---------------------------------
 
         return cases;
     }
@@ -221,9 +175,7 @@ public without sharing class ServiceAccountHierarchyDeletionBatch implements Dat
     private List<SObject> deduplicate(List<SObject> input) {
         if (input == null || input.isEmpty()) return new List<SObject>();
         Map<Id, SObject> uniqueMap = new Map<Id, SObject>();
-        for (SObject obj : input) {
-            uniqueMap.put(obj.Id, obj);
-        }
+        for (SObject obj : input) uniqueMap.put(obj.Id, obj);
         return uniqueMap.values();
     }
 
@@ -238,7 +190,9 @@ public without sharing class ServiceAccountHierarchyDeletionBatch implements Dat
         if (!docIds.isEmpty()) {
             List<ContentDocument> docsToDelete = new List<ContentDocument>();
             for (Id docId : docIds) docsToDelete.add(new ContentDocument(Id = docId));
-            delete docsToDelete;
+            
+            // Delete files (Errors ignored so main process continues if file is locked/undeletable)
+            Database.delete(docsToDelete, false);
         }
     }
 }
