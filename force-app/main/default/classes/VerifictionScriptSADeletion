@@ -1,0 +1,69 @@
+// === 🗑️ FINAL DELETION VERIFICATION SCRIPT ===
+Id saId = 'a1DS900000CBY4gMAH';       // REPLACE with your Service Account ID
+Id mainCaseId = '500S900000SkGbAIAV'; // REPLACE with your Main Case ID
+
+System.debug('=== 🔎 VERIFYING DELETION FOR ' + saId + ' ===');
+
+// --- 1. ROOT SERVICE ACCOUNT ---
+Integer parents = [SELECT Count() FROM Service_Account__c WHERE Id = :saId];
+System.debug('1. Service Account:           ' + (parents == 0 ? '✅ DELETED' : '❌ FAILED (Still Exists)'));
+
+// --- 2. BUCKET 1: FINANCIALS & SUPPLY ---
+Integer mandates = [SELECT Count() FROM Direct_Debit_Mandate__c WHERE Service_Account__c = :saId];
+Integer subs     = [SELECT Count() FROM Direct_Debit_Subscription__c WHERE Service_Account__c = :saId];
+Integer owners   = [SELECT Count() FROM Supply_Point_Ownership__c WHERE Service_Account__c = :saId];
+// Check Disputes via Supply Points (since Supply Points might still exist if ownership failed)
+Integer disputes = [SELECT Count() FROM Dispute__c WHERE Supply_Point__c IN (SELECT Supply_Point__c FROM Supply_Point_Ownership__c WHERE Service_Account__c = :saId)];
+// Gas Cards linked to Supply Points
+Integer spCards  = [SELECT Count() FROM Gas_Card__c WHERE Service_Account__c = :saId AND Meter_Point_Reference__c != null];
+
+Integer bucket1Total = mandates + subs + owners + disputes + spCards;
+System.debug('2. Financials/Supply Bucket:  ' + (bucket1Total == 0 ? '✅ DELETED' : '❌ FAILED (' + bucket1Total + ' left)'));
+
+// --- 3. BUCKET 2: SERVICE RECORDS ---
+Integer addons   = [SELECT Count() FROM Addon__c WHERE Service_Account__c = :saId];
+Integer comms    = [SELECT Count() FROM Communication__c WHERE Service_Account__c = :saId];
+Integer perms    = [SELECT Count() FROM Contact_Permission__c WHERE Service_Account__c = :saId];
+Integer flags    = [SELECT Count() FROM SSE_Migration_Flags__c WHERE Service_Account__c = :saId];
+Integer refs     = [SELECT Count() FROM SSE_Migration_Reference__c WHERE Service_Account__c = :saId];
+// Gas Cards directly on Service Account (Orphans)
+Integer saCards  = [SELECT Count() FROM Gas_Card__c WHERE Service_Account__c = :saId AND Meter_Point_Reference__c = null];
+
+Integer bucket2Total = addons + comms + perms + flags + refs + saCards;
+System.debug('3. Service Records Bucket:    ' + (bucket2Total == 0 ? '✅ DELETED' : '❌ FAILED (' + bucket2Total + ' left)'));
+
+// --- 4. BUCKET 3: AGENTS & ACTIONS ---
+// Agents are Parents, Actions are Children
+Integer agents   = [SELECT Count() FROM Agent__c WHERE Service_Account__c = :saId OR Case__c = :mainCaseId];
+Integer actions  = [SELECT Count() FROM Agent_Action__c WHERE Agent__r.Service_Account__c = :saId];
+
+// Emails should be gone via Cascade Delete
+Integer agentEmails = [SELECT Count() FROM EmailMessage WHERE RelatedToId IN (SELECT Id FROM Agent__c WHERE Service_Account__c = :saId)];
+Integer actionEmails = [SELECT Count() FROM EmailMessage WHERE RelatedToId IN (SELECT Id FROM Agent_Action__c WHERE Agent__r.Service_Account__c = :saId)];
+
+Integer bucket3AgentTotal = agents + actions + agentEmails + actionEmails;
+System.debug('4. Agent Hierarchy:           ' + (bucket3AgentTotal == 0 ? '✅ DELETED' : '❌ FAILED (' + bucket3AgentTotal + ' left)'));
+
+// --- 5. BUCKET 3: CASES & KNOWLEDGE ---
+Integer caseActs = [SELECT Count() FROM Case_Action__c WHERE Case__c = :mainCaseId OR Internal_Case__c = :mainCaseId];
+Integer know     = [SELECT Count() FROM Knowledge_Article_Tracking__c WHERE Case__c = :mainCaseId];
+Integer caseEm   = [SELECT Count() FROM EmailMessage WHERE ParentId = :mainCaseId];
+
+Integer bucket3CaseTotal = caseActs + know + caseEm;
+System.debug('5. Case Related Items:        ' + (bucket3CaseTotal == 0 ? '✅ DELETED' : '❌ FAILED (' + bucket3CaseTotal + ' left)'));
+
+// --- 6. OMBUDSMAN (Cascade Verification) ---
+Integer ombCases = [SELECT Count() FROM Ombudsman_Case__c WHERE Case__c = :mainCaseId];
+Integer ombRes   = [SELECT Count() FROM Ombudsman_Resolution__c WHERE Resolution_Case__c = :mainCaseId];
+
+// If Omb Case is gone, Omb Resolution MUST be gone too
+System.debug('6. Ombudsman Hierarchy:       ' + ((ombCases + ombRes) == 0 ? '✅ DELETED' : '❌ FAILED (Cases: ' + ombCases + ', Resolutions: ' + ombRes + ')'));
+
+System.debug('------------------------------------------');
+Integer grandTotal = parents + bucket1Total + bucket2Total + bucket3AgentTotal + bucket3CaseTotal + ombCases + ombRes;
+
+if (grandTotal == 0) {
+    System.debug('🏆 SUCCESS: ALL RECORDS CLEANED UP.');
+} else {
+    System.debug('⚠️ WARNING: ' + grandTotal + ' RECORDS REMAIN.');
+}

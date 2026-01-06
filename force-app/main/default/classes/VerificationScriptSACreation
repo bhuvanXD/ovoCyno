@@ -1,0 +1,114 @@
+// === 🔎 FINAL VERIFICATION SCRIPT (ALL 26 RECORDS) ===
+Id saId = 'a1DPt000001HbH7MAK';       // REPLACE with your Target Service Account ID
+Id mainCaseId = '500Pt00000JV6r2IAD'; // REPLACE with your Main Case ID
+
+System.debug('=== 🔎 STARTING VERIFICATION FOR ' + saId + ' ===');
+
+// --- 1. PARENTS & ROOTS (3 Records) ---
+Integer saCheck = [SELECT Count() FROM Service_Account__c WHERE Id = :saId];
+System.debug('1. Service Account:           ' + (saCheck > 0 ? '✅ Found' : '❌ MISSING'));
+
+// We check for the dummy parents created linked to the SA's Gas Card
+List<Gas_Card__c> saCards = [SELECT Customer__c, Customer__r.AccountId FROM Gas_Card__c WHERE Service_Account__c = :saId LIMIT 1];
+if (!saCards.isEmpty()) {
+    System.debug('2. Dummy Contact:             ✅ Found (' + saCards[0].Customer__c + ')');
+    System.debug('3. Dummy Account:             ✅ Found (' + saCards[0].Customer__r.AccountId + ')');
+} else {
+    System.debug('2. Dummy Contact:             ❌ MISSING');
+    System.debug('3. Dummy Account:             ❌ MISSING');
+}
+
+// --- 2. SERVICE ACCOUNT CHILDREN (6 Records) ---
+Integer addons = [SELECT Count() FROM Addon__c WHERE Service_Account__c = :saId];
+System.debug('4. Addon__c:                  ' + (addons > 0 ? '✅ Found' : '❌ MISSING'));
+
+Integer comms = [SELECT Count() FROM Communication__c WHERE Service_Account__c = :saId];
+System.debug('5. Communication__c:          ' + (comms > 0 ? '✅ Found' : '❌ MISSING'));
+
+Integer perms = [SELECT Count() FROM Contact_Permission__c WHERE Service_Account__c = :saId];
+System.debug('6. Contact_Permission__c:     ' + (perms > 0 ? '✅ Found' : '❌ MISSING'));
+
+Integer sseFlags = [SELECT Count() FROM SSE_Migration_Flags__c WHERE Service_Account__c = :saId];
+System.debug('7. SSE_Migration_Flags__c:    ' + (sseFlags > 0 ? '✅ Found' : '❌ MISSING'));
+
+Integer sseRefs = [SELECT Count() FROM SSE_Migration_Reference__c WHERE Service_Account__c = :saId];
+System.debug('8. SSE_Migration_Ref__c:      ' + (sseRefs > 0 ? '✅ Found' : '❌ MISSING'));
+
+Integer gcSA = [SELECT Count() FROM Gas_Card__c WHERE Service_Account__c = :saId AND Meter_Point_Reference__c = NULL];
+System.debug('9. Gas_Card__c (Direct):      ' + (gcSA > 0 ? '✅ Found' : '❌ MISSING'));
+
+
+// --- 3. AGENTS ON SA (4 Records) ---
+List<Agent__c> saAgents = [SELECT Id FROM Agent__c WHERE Service_Account__c = :saId];
+System.debug('10. Agent__c (on SA):         ' + (!saAgents.isEmpty() ? '✅ Found' : '❌ MISSING'));
+
+if (!saAgents.isEmpty()) {
+    Integer agentEmails = [SELECT Count() FROM EmailMessage WHERE RelatedToId = :saAgents[0].Id];
+    System.debug('11. Email (on Agent):         ' + (agentEmails > 0 ? '✅ Found' : '❌ MISSING'));
+
+    List<Agent_Action__c> actions = [SELECT Id FROM Agent_Action__c WHERE Agent__c = :saAgents[0].Id];
+    System.debug('12. Agent_Action__c:          ' + (!actions.isEmpty() ? '✅ Found' : '❌ MISSING'));
+
+    if (!actions.isEmpty()) {
+        Integer actionEmails = [SELECT Count() FROM EmailMessage WHERE RelatedToId = :actions[0].Id];
+        System.debug('13. Email (on Action):        ' + (actionEmails > 0 ? '✅ Found' : '❌ MISSING'));
+    }
+} else {
+    System.debug('11-13. Agent Hierarchy:       ❌ SKIPPED (Parent Missing)');
+}
+
+
+// --- 4. FINANCIALS (2 Records) ---
+List<Direct_Debit_Mandate__c> ddm = [SELECT Id FROM Direct_Debit_Mandate__c WHERE Service_Account__c = :saId];
+System.debug('14. Direct_Debit_Mandate__c:  ' + (!ddm.isEmpty() ? '✅ Found' : '❌ MISSING'));
+
+if (!ddm.isEmpty()) {
+    Integer subs = [SELECT Count() FROM Direct_Debit_Subscription__c WHERE Direct_Debit_Mandate__c = :ddm[0].Id];
+    System.debug('15. DD Subscription:          ' + (subs > 0 ? '✅ Found' : '❌ MISSING'));
+}
+
+
+// --- 5. SUPPLY POINTS (4 Records) ---
+List<Supply_Point_Ownership__c> owners = [SELECT Supply_Point__c FROM Supply_Point_Ownership__c WHERE Service_Account__c = :saId];
+System.debug('16. SP Ownership:             ' + (!owners.isEmpty() ? '✅ Found' : '❌ MISSING'));
+
+if (!owners.isEmpty()) {
+    Id spId = owners[0].Supply_Point__c;
+    Integer spCheck = [SELECT Count() FROM Supply_Point__c WHERE Id = :spId];
+    System.debug('17. Supply_Point__c:          ' + (spCheck > 0 ? '✅ Found' : '❌ MISSING'));
+
+    Integer disputes = [SELECT Count() FROM Dispute__c WHERE Supply_Point__c = :spId];
+    System.debug('18. Dispute__c:               ' + (disputes > 0 ? '✅ Found' : '❌ MISSING'));
+
+    Integer gcSP = [SELECT Count() FROM Gas_Card__c WHERE Meter_Point_Reference__c = :spId];
+    System.debug('19. Gas_Card__c (on SP):      ' + (gcSP > 0 ? '✅ Found' : '❌ MISSING'));
+}
+
+
+// --- 6. MAIN CASE HIERARCHY (5 Records) ---
+Integer caseAgent = [SELECT Count() FROM Agent__c WHERE Case__c = :mainCaseId];
+System.debug('20. Agent__c (on Case):       ' + (caseAgent > 0 ? '✅ Found' : '❌ MISSING'));
+
+Integer stdAction = [SELECT Count() FROM Case_Action__c WHERE Case__c = :mainCaseId];
+System.debug('21. Case_Action__c (Std):     ' + (stdAction > 0 ? '✅ Found' : '❌ MISSING'));
+
+Integer intAction = [SELECT Count() FROM Case_Action__c WHERE Internal_Case__c = :mainCaseId];
+System.debug('22. Case_Action__c (Int):     ' + (intAction > 0 ? '✅ Found' : '❌ MISSING'));
+
+Integer caseEmail = [SELECT Count() FROM EmailMessage WHERE ParentId = :mainCaseId];
+System.debug('23. EmailMessage (Case):      ' + (caseEmail > 0 ? '✅ Found' : '❌ MISSING'));
+
+Integer knowTrack = [SELECT Count() FROM Knowledge_Article_Tracking__c WHERE Case__c = :mainCaseId];
+System.debug('24. Knowledge_Article_Track:  ' + (knowTrack > 0 ? '✅ Found' : '❌ MISSING'));
+
+
+// --- 7. OMBUDSMAN (2 Records) ---
+List<Ombudsman_Case__c> ombCases = [SELECT Id FROM Ombudsman_Case__c WHERE Case__c = :mainCaseId];
+System.debug('25. Ombudsman_Case__c:        ' + (!ombCases.isEmpty() ? '✅ Found' : '❌ MISSING'));
+
+if (!ombCases.isEmpty()) {
+    Integer ombRes = [SELECT Count() FROM Ombudsman_Resolution__c WHERE Ombudsman_Case__c = :ombCases[0].Id];
+    System.debug('26. Ombudsman_Resolution__c:  ' + (ombRes > 0 ? '✅ Found' : '❌ MISSING'));
+}
+
+System.debug('=== 🏁 VERIFICATION COMPLETE ===');
