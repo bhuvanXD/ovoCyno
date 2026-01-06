@@ -1,4 +1,4 @@
-// === 🔎 FINAL VERIFICATION SCRIPT (ALL 26 RECORDS) ===
+// === 🔎 FINAL VERIFICATION SCRIPT FOR A SINGLE SA (ALL 26 RECORDS) ===
 Id saId = 'a1DPt000001HbH7MAK';       // REPLACE with your Target Service Account ID
 Id mainCaseId = '500Pt00000JV6r2IAD'; // REPLACE with your Main Case ID
 

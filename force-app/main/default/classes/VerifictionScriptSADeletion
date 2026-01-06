@@ -1,4 +1,4 @@
-// === 🗑️ FINAL DELETION VERIFICATION SCRIPT ===
+// === 🗑️ FINAL DELETION VERIFICATION SCRIPT FOR A SINGLE SA ===
 Id saId = 'a1DS900000CBY4gMAH';       // REPLACE with your Service Account ID
 Id mainCaseId = '500S900000SkGbAIAV'; // REPLACE with your Main Case ID
 
