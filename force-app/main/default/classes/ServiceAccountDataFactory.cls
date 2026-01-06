@@ -1,3 +1,5 @@
+//Batch for creating service account hierarchies in BULK
+
 public class ServiceAccountDataFactory implements Database.Batchable<Integer>, Database.Stateful {
     
     private Integer totalHierarchiesToCreate;
