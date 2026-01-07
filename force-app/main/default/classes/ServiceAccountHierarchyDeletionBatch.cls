@@ -1,3 +1,12 @@
+//Class for deletion of SA and its related records
+
+
+/*
+// === 🗑️ EXECUTE BATCH DELETION ===
+ServiceAccountHierarchyDeletionBatch batch = new ServiceAccountHierarchyDeletionBatch();
+Database.executeBatch(batch, 50); // Batch size 50 is safe
+*/
+
 public without sharing class ServiceAccountHierarchyDeletionBatch implements Database.Batchable<SObject>, Database.Stateful {
 
     private Integer totalSAProcessed = 0;

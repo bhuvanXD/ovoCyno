@@ -1,3 +1,11 @@
+//batch class for deleting default case data
+
+/*
+EmailDefaultCaseDataDeletionBatch batch = new EmailDefaultCaseDataDeletionBatch();
+Database.executeBatch(batch, 50)
+*/
+
+
 public class EmailDefaultCaseDataDeletionBatch
     implements Database.Batchable<SObject>, Database.Stateful {
  
@@ -7,7 +15,7 @@ public class EmailDefaultCaseDataDeletionBatch
     public Database.QueryLocator start(Database.BatchableContext bc) {
         return Database.getQueryLocator([
             SELECT Id
-            FROM Case LIMIT 510
+            FROM Case
         ]);
     }
  
@@ -55,16 +63,8 @@ public class EmailDefaultCaseDataDeletionBatch
             }
  
            
-            if (!docIds.isEmpty()) {
-                List<ContentDocument> filesToDelete = new List<ContentDocument>();
-                for (Id dId : docIds) {
-                    filesToDelete.add(new ContentDocument(Id = dId));
-                }
-                delete filesToDelete;
-            }
- 
             //NEWLY ADDED
-            // 4. Delete Related Custom Objects
+            // 4. Collect Related Custom Objects
             List<SObject> relatedObjectsToDelete = new List<SObject>();
  
             relatedObjectsToDelete.addAll([
@@ -85,11 +85,22 @@ public class EmailDefaultCaseDataDeletionBatch
                 WHERE Resolution_Case__c IN :caseIds
             ]);
  
+            // 5. Delete Operations (Consolidated at the end)
+            if (!docIds.isEmpty()) {
+                List<ContentDocument> filesToDelete = new List<ContentDocument>();
+                for (Id dId : docIds) {
+                    filesToDelete.add(new ContentDocument(Id = dId));
+                }
+                if (!filesToDelete.isEmpty()) {
+                    delete filesToDelete;
+                }
+            }
+
             if (!relatedObjectsToDelete.isEmpty()) {
                 delete relatedObjectsToDelete;
             }
- 
-            // 5. Delete Cases (EmailMessages cascade)
+
+            // 6. Delete Cases (EmailMessages cascade)
             delete scope;
  
         } catch (Exception ex) {

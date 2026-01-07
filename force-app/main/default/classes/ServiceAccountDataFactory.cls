@@ -1,5 +1,16 @@
 //Batch for creating service account hierarchies in BULK
 
+/*
+// === 🏭 DATA FACTORY EXECUTION (SAFE MODE) ===
+ 
+ServiceAccountDataFactory factoryBatch = new ServiceAccountDataFactory(50000);
+
+Database.executeBatch(factoryBatch, 3);
+System.debug('🚀 Batch Job Submitted');
+
+
+*/
+
 public class ServiceAccountDataFactory implements Database.Batchable<Integer>, Database.Stateful {
     
     private Integer totalHierarchiesToCreate;
