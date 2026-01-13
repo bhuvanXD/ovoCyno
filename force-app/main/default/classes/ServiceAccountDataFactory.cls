@@ -4,12 +4,13 @@
 // === 🏭 DATA FACTORY EXECUTION (SAFE MODE) ===
  
 ServiceAccountDataFactory factoryBatch = new ServiceAccountDataFactory(50000);
+Database.executeBatch(factoryBatch, 3);
+System.debug('!!! Batch Job Submitted !!!');
 
-// ⚠️ WARNING: Do NOT use a batch size > 5. 
+// WARNING: Do NOT use a batch size > 5. 
 // This class performs individual inserts per hierarchy (non-bulkified). 
 // Larger batch sizes will hit SOQL/DML limits from Triggers/Flows.
-Database.executeBatch(factoryBatch, 3);
-System.debug('🚀 Batch Job Submitted');
+
 
 
 */
@@ -30,36 +31,35 @@ public class ServiceAccountDataFactory implements Database.Batchable<Integer>, D
     }
 
     public void execute(Database.BatchableContext bc, List<Integer> scope) {
-        // --- DATA MAPS (To hold parent IDs) ---
-        Map<Integer, Account> accountMap = new Map<Integer, Account>();
+        // --- DATA MAPS ---
+        // Removed Account Map
         Map<Integer, Contact> contactMap = new Map<Integer, Contact>();
         Map<Integer, Service_Account__c> saMap = new Map<Integer, Service_Account__c>();
         Map<Integer, Case> mainCaseMap = new Map<Integer, Case>();
         
-        // 1. ACCOUNTS
+        // 1. CONTACTS (Created without linking to a Standard Account)
         for (Integer i : scope) {
-            accountMap.put(i, new Account(Name = 'Bulk Account ' + System.currentTimeMillis() + '_' + i));
-        }
-        insert accountMap.values();
-
-        // 2. CONTACTS
-        for (Integer i : scope) {
-            contactMap.put(i, new Contact(AccountId = accountMap.get(i).Id, LastName = 'Bulk Con ' + i, Email = 'test' + i + '@example.com'));
+            contactMap.put(i, new Contact(
+                LastName = 'Bulk Con ' + i, 
+                Email = 'test' + i + '@example.com'
+            ));
         }
         insert contactMap.values();
 
-        // 3. SERVICE ACCOUNTS
+        // 2. SERVICE ACCOUNTS
         for (Integer i : scope) {
             saMap.put(i, new Service_Account__c(
                 Name = 'SA_INTERNAL_MIGRATION_' + i,
-                Service_Account_Id__c = 'ACC-100000' + i,
-                Offset__c = '0', Billing_Information_Offset__c = '0', SSE_Migration_Status_Offset__c = '0'
+                Service_Account_Id__c = 'ACCa-200000' + i,
+                Offset__c = '0', 
+                Billing_Information_Offset__c = '0', 
+                SSE_Migration_Status_Offset__c = '0'
             ));
         }
         insert saMap.values();
         successfulCreations += scope.size();
 
-        // 4. MAIN CASES
+        // 3. MAIN CASES
         Id complaintRT = Schema.SObjectType.Case.getRecordTypeInfosByDeveloperName().get('Complaints_Unescalated').getRecordTypeId();
         for (Integer i : scope) {
             mainCaseMap.put(i, new Case(
@@ -93,13 +93,15 @@ public class ServiceAccountDataFactory implements Database.Batchable<Integer>, D
             perms.add(new Contact_Permission__c(Service_Account__c = saId, Account_Binding_Key__c = 'KEY-' + i + '-' + System.currentTimeMillis()));
             sseFlags.add(new SSE_Migration_Flags__c(Service_Account__c = saId, SSE_Service_Account_Id__c = saId));
             sseRefs.add(new SSE_Migration_Reference__c(Service_Account__c = saId, SSE_Service_Account_Id__c = saId));
+            
+            // Gas Card linked to Service Account + Independent Contact
             saGasCards.add(new Gas_Card__c(Service_Account__c = saId, Customer__c = conId, Address_Line_1__c = '123 Bulk St', Town_City__c = 'Test City', Postcode__c = 'BK1 9ZZ'));
             
             // Prepare Agent for Insert
             saAgentMap.put(i, new Agent__c(Service_Account__c = saId));
         }
         
-        // INSERT STANDARD CHILDREN (No Try-Catch)
+        // INSERT STANDARD CHILDREN
         insert addons;
         insert comms;
         insert perms;
@@ -121,15 +123,7 @@ public class ServiceAccountDataFactory implements Database.Batchable<Integer>, D
         }
         insert agentActions;
         
-        // Email for Agent Action
-        // Note: We need the Action IDs to link the email
-        // Since we just inserted agentActions list, if we want to link emails to THEM, we need to map them back?
-        // Actually the original code did: insert agentAction; insert new EmailMessage(RelatedToId = agentAction.Id...);
-        // So yes, we need them.
-        
-        // Since 'agentActions' list is preserved in order, and 'scope' is ordered, 
-        // agentActions[0] corresponds to scope[0].
-        // Let's use that valid assumption for bulk lists.
+        // Match Action Emails to Actions
         List<EmailMessage> actionEmails = new List<EmailMessage>();
         for (Integer k = 0; k < agentActions.size(); k++) {
             actionEmails.add(new EmailMessage(RelatedToId = agentActions[k].Id, Subject = 'Action Email', FromAddress='t@t.com', ToAddress='t@t.com'));
@@ -234,7 +228,7 @@ public class ServiceAccountDataFactory implements Database.Batchable<Integer>, D
         for (Integer i : scope) {
              // Case File
              validFiles.add(prepareFile(mainCaseMap.get(i).Id, 'Case Evidence ' + i));
-             // Ombudsman File (always exists in this logic)
+             // Ombudsman File
              validFiles.add(prepareFile(ombMap.get(i).Id, 'Ombudsman Report ' + i));
         }
         insert validFiles;

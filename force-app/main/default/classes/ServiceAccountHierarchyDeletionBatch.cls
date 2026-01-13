@@ -120,7 +120,7 @@ public without sharing class ServiceAccountHierarchyDeletionBatch implements Dat
 
         // Build email
         Messaging.SingleEmailMessage mail = new Messaging.SingleEmailMessage();
-        mail.setToAddresses(new String[] { 'bhuv.sain@cynoteck.com' });
+        mail.setToAddresses(new String[] { 'bhuvan.sain@cynoteck.com' });
         mail.setSubject('Batch Job Summary: Service Account Cleanup');
 
         String body =
@@ -189,10 +189,13 @@ public without sharing class ServiceAccountHierarchyDeletionBatch implements Dat
         plan.serviceRecords.addAll([SELECT Id FROM Gas_Card__c WHERE Service_Account__c IN :saIds AND Meter_Point_Reference__c = NULL]);
     }
 
-    private List<Case> collectCaseRecords(Set<Id> saIds, DeletionPlan plan) {
+   private List<Case> collectCaseRecords(Set<Id> saIds, DeletionPlan plan) {
         // 1. Initial Scope (Directly on Service Account)
         List<Case> cases = [SELECT Id, ParentId, Originating_Case__c FROM Case WHERE Service_Account__c IN :saIds];
-        Set<Id> caseIds = new Map<Id, Case>(cases).keySet();
+      
+        // --- FIX IS HERE ---
+        // Wrap the keySet() in a new Set<Id>(...) to make it a modifiable copy.
+        Set<Id> caseIds = new Set<Id>(new Map<Id, Case>(cases).keySet());
 
         if (caseIds.isEmpty())
         {
@@ -223,7 +226,7 @@ public without sharing class ServiceAccountHierarchyDeletionBatch implements Dat
         for (Case c : relatedCases) {
             if (!caseIds.contains(c.Id)) {
                 cases.add(c);
-                caseIds.add(c.Id);
+                caseIds.add(c.Id); // This line will now work successfully
             }
         }
 
